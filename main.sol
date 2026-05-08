@@ -73,3 +73,78 @@ interface IUniV2LikeRouter {
     ) external returns (uint256[] memory amounts);
 }
 
+interface IPriceOracle {
+    /// @notice Returns \(price, updatedAt\) where price is quote/base scaled to 1e18.
+    function priceX18(address base, address quote) external view returns (uint256 price, uint256 updatedAt);
+}
+
+// ------------------------------- Libraries -------------------------------
+
+library Math2 {
+    function min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a < b ? a : b;
+    }
+
+    function max(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a > b ? a : b;
+    }
+
+    function absDiff(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a >= b ? a - b : b - a;
+    }
+
+    /// @dev Full precision mulDiv adapted to Solidity 0.8 (no external deps).
+    function mulDiv(uint256 x, uint256 y, uint256 denominator) internal pure returns (uint256 result) {
+        unchecked {
+            uint256 prod0;
+            uint256 prod1;
+            assembly {
+                let mm := mulmod(x, y, not(0))
+                prod0 := mul(x, y)
+                prod1 := sub(sub(mm, prod0), lt(mm, prod0))
+            }
+            if (prod1 == 0) {
+                require(denominator != 0, "M2:den0");
+                assembly {
+                    result := div(prod0, denominator)
+                }
+                return result;
+            }
+            require(denominator > prod1, "M2:ovf");
+            uint256 remainder;
+            assembly {
+                remainder := mulmod(x, y, denominator)
+                prod1 := sub(prod1, gt(remainder, prod0))
+                prod0 := sub(prod0, remainder)
+            }
+            uint256 twos = denominator & (~denominator + 1);
+            assembly {
+                denominator := div(denominator, twos)
+                prod0 := div(prod0, twos)
+                twos := add(div(sub(0, twos), twos), 1)
+            }
+            prod0 |= prod1 * twos;
+            uint256 inverse = (3 * denominator) ^ 2;
+            inverse *= 2 - denominator * inverse; // mod 2^8
+            inverse *= 2 - denominator * inverse; // mod 2^16
+            inverse *= 2 - denominator * inverse; // mod 2^32
+            inverse *= 2 - denominator * inverse; // mod 2^64
+            inverse *= 2 - denominator * inverse; // mod 2^128
+            inverse *= 2 - denominator * inverse; // mod 2^256
+            result = prod0 * inverse;
+        }
+    }
+}
+
+library SafeCast2 {
+    function toUint96(uint256 x) internal pure returns (uint96) {
+        require(x <= type(uint96).max, "SC2:u96");
+        return uint96(x);
+    }
+
+    function toUint64(uint256 x) internal pure returns (uint64) {
+        require(x <= type(uint64).max, "SC2:u64");
+        return uint64(x);
+    }
+
+    function toUint48(uint256 x) internal pure returns (uint48) {
