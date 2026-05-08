@@ -223,3 +223,78 @@ library ECDSA2 {
             s := mload(add(signature, 64))
             v := byte(0, mload(add(signature, 96)))
         }
+        if (v < 27) v += 27;
+        if (v != 27 && v != 28) revert("E2:v");
+        if (uint256(s) > 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff) revert("E2:s");
+        address signer = ecrecover(hash, v, r, s);
+        if (signer == address(0)) revert("E2:z");
+        return signer;
+    }
+
+    function toEthSignedMessageHash(bytes32 hash) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+    }
+}
+
+abstract contract ReentrancyGuard2 {
+    uint256 private _rg;
+    error RG2_Reentered();
+
+    modifier nonReentrant() {
+        if (_rg == 2) revert RG2_Reentered();
+        _rg = 2;
+        _;
+        _rg = 1;
+    }
+
+    constructor() {
+        _rg = 1;
+    }
+}
+
+abstract contract Pausable2 {
+    bool private _paused;
+
+    error P2_Paused();
+    error P2_NotPaused();
+
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
+
+    modifier whenNotPaused() {
+        if (_paused) revert P2_Paused();
+        _;
+    }
+
+    modifier whenPaused() {
+        if (!_paused) revert P2_NotPaused();
+        _;
+    }
+
+    function paused() public view returns (bool) {
+        return _paused;
+    }
+
+    function _pause() internal whenNotPaused {
+        _paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function _unpause() internal whenPaused {
+        _paused = false;
+        emit Unpaused(msg.sender);
+    }
+}
+
+abstract contract Ownable2Step2 {
+    address private _owner;
+    address private _pendingOwner;
+
+    error O2_NotOwner(address caller);
+    error O2_NotPending(address caller);
+    error O2_ZeroOwner();
+
+    event OwnershipTransferStarted(address indexed owner, address indexed pendingOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    constructor(address initialOwner) {
