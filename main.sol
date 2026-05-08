@@ -148,3 +148,78 @@ library SafeCast2 {
     }
 
     function toUint48(uint256 x) internal pure returns (uint48) {
+        require(x <= type(uint48).max, "SC2:u48");
+        return uint48(x);
+    }
+
+    function toUint32(uint256 x) internal pure returns (uint32) {
+        require(x <= type(uint32).max, "SC2:u32");
+        return uint32(x);
+    }
+}
+
+library Address2 {
+    function isContract(address a) internal view returns (bool) {
+        return a.code.length > 0;
+    }
+
+    function sendValue(address payable to, uint256 amount) internal {
+        require(address(this).balance >= amount, "A2:bal");
+        (bool ok, ) = to.call{value: amount}("");
+        require(ok, "A2:send");
+    }
+
+    function functionCall(address target, bytes memory data, string memory err) internal returns (bytes memory) {
+        require(isContract(target), "A2:nc");
+        (bool ok, bytes memory ret) = target.call(data);
+        if (ok) return ret;
+        if (ret.length > 0) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        revert(err);
+    }
+}
+
+library SafeERC202 {
+    using Address2 for address;
+
+    function safeTransfer(IERC20 token, address to, uint256 value) internal {
+        bytes memory ret = address(token).functionCall(abi.encodeWithSelector(token.transfer.selector, to, value), "S2:t");
+        if (ret.length > 0) require(abi.decode(ret, (bool)), "S2:t0");
+    }
+
+    function safeTransferFrom(IERC20 token, address from, address to, uint256 value) internal {
+        bytes memory ret =
+            address(token).functionCall(abi.encodeWithSelector(token.transferFrom.selector, from, to, value), "S2:tf");
+        if (ret.length > 0) require(abi.decode(ret, (bool)), "S2:tf0");
+    }
+
+    function safeApprove(IERC20 token, address spender, uint256 value) internal {
+        bytes memory ret =
+            address(token).functionCall(abi.encodeWithSelector(token.approve.selector, spender, value), "S2:a");
+        if (ret.length > 0) require(abi.decode(ret, (bool)), "S2:a0");
+    }
+
+    function forceApprove(IERC20 token, address spender, uint256 value) internal {
+        bytes memory ret =
+            address(token).functionCall(abi.encodeWithSelector(token.approve.selector, spender, value), "S2:fa");
+        if (ret.length > 0 && !abi.decode(ret, (bool))) {
+            safeApprove(token, spender, 0);
+            safeApprove(token, spender, value);
+        }
+    }
+}
+
+library ECDSA2 {
+    function recover(bytes32 hash, bytes memory signature) internal pure returns (address) {
+        if (signature.length != 65) revert("E2:sig");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
