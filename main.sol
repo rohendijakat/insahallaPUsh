@@ -598,3 +598,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
         return keccak256(abi.encode(path));
     }
 
+    // ------------------------------ Admin controls ------------------------------
+    function setKeeper(address keeper, bool enabled) external onlyOwner {
+        if (keeper == address(0)) revert IPUSH_ZeroAddress();
+        isKeeper[keeper] = enabled;
+        emit KeeperSet(keeper, enabled);
+    }
+
+    function setGuardian(address guardian, bool enabled) external onlyOwner {
+        if (guardian == address(0)) revert IPUSH_ZeroAddress();
+        isGuardian[guardian] = enabled;
+        emit GuardianSet(guardian, enabled);
+    }
+
+    function setTreasury(address nextTreasury) external onlyOwner {
+        if (nextTreasury == address(0)) revert IPUSH_ZeroAddress();
+        address prev = treasury;
+        treasury = nextTreasury;
+        emit TreasurySet(prev, nextTreasury);
+    }
+
+    function setOracle(address nextOracle) external onlyOwner {
+        if (nextOracle == address(0)) revert IPUSH_ZeroAddress();
+        if (!Address2.isContract(nextOracle)) revert IPUSH_BadRouter(nextOracle);
+        oracle = IPriceOracle(nextOracle);
+        emit OracleSet(nextOracle);
+    }
+
+    function pauseByGuardian() external onlyGuardian whenNotPaused {
+        _pause();
+        emit PausedByGuardian(msg.sender);
+    }
+
+    function unpauseByOwner() external onlyOwner whenPaused {
+        _unpause();
+        emit UnpausedByOwner(msg.sender);
+    }
+
+    // ------------------------------ Venue management ------------------------------
+    function addVenue(address router, bytes8 tag, uint16 feeBpsCeiling) external onlyOwner returns (uint32 venueId) {
+        if (router == address(0)) revert IPUSH_ZeroAddress();
+        if (!Address2.isContract(router)) revert IPUSH_BadRouter(router);
+        if (venueCount >= MAX_VENUES) revert IPUSH_TooMany();
+
+        venueId = venueCount;
+        _venues[venueId] = Venue({router: router, feeBpsCeiling: feeBpsCeiling, enabled: true, tag: tag});
+        venueCount = venueId + 1;
+        emit VenueAdded(venueId, router, tag, feeBpsCeiling);
+    }
+
+    function setVenue(uint32 venueId, address router, bytes8 tag, uint16 feeBpsCeiling, bool enabled) external onlyOwner {
+        if (venueId >= venueCount) revert IPUSH_BadVenue(venueId);
+        if (router == address(0)) revert IPUSH_ZeroAddress();
+        if (!Address2.isContract(router)) revert IPUSH_BadRouter(router);
+
+        _venues[venueId] = Venue({router: router, feeBpsCeiling: feeBpsCeiling, enabled: enabled, tag: tag});
+        emit VenueUpdated(venueId, router, tag, feeBpsCeiling, enabled);
+    }
+
+    // ------------------------------ Strategy management ------------------------------
+    function createStrategy(
+        address operator,
+        address base,
+        address quote,
+        uint32 venueId,
+        bytes12 label,
+        uint8 baseDecimalsHint,
+        uint8 quoteDecimalsHint,
+        RiskCfg calldata risk
+    ) external onlyOwner returns (uint32 strategyId) {
+        if (operator == address(0) || base == address(0) || quote == address(0)) revert IPUSH_ZeroAddress();
+        if (strategyCount >= MAX_STRATEGIES) revert IPUSH_TooMany();
+        if (venueId >= venueCount) revert IPUSH_BadVenue(venueId);
+        if (!_venues[venueId].enabled) revert IPUSH_VenueDisabled(venueId);
+
+        strategyId = strategyCount;
