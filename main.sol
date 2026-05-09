@@ -748,3 +748,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
             o.venueId,
             o.nonce,
             uint8(o.side),
+            uint8(o.kind),
+            base,
+            quote,
+            amountIn,
+            amountOut,
+            o.clientTag,
+            o.recipient
+        );
+    }
+
+    function executeOrderExactOut(
+        Order calldata o,
+        bytes calldata operatorSig,
+        address[] calldata path,
+        PermitData calldata permit
+    ) external onlyKeeper whenNotPaused nonReentrant returns (uint256 amountIn, uint256 amountOut) {
+        _validateOrderCommon(o, operatorSig, path);
+        if (o.kind != OrderKind.ExactOut) revert("IPUSH:kind2");
+        amountOut = uint256(o.amountOut);
+
+        (address base, address quote) = (path[0], path[path.length - 1]);
+        _applyRiskAndState(o.strategyId, quote, o.side, uint256(o.amountIn), amountOut, o.slippageBps);
+
+        if (permit.token != address(0)) _tryPermit(permit);
+        _pullFunds(base, o.recipient, uint256(o.amountIn));
+
+        (amountIn) = _swapExactOut(o, path, amountOut);
+
+        emit OrderExecuted(
+            o.strategyId,
+            o.venueId,
+            o.nonce,
+            uint8(o.side),
+            uint8(o.kind),
+            base,
+            quote,
+            amountIn,
+            amountOut,
+            o.clientTag,
+            o.recipient
+        );
+    }
+
+    // ------------------------------ Fee skimming ------------------------------
+    /// @notice Withdraw tokens mistakenly left on the contract (not user funds).
+    function skimToken(address token, uint256 amount, address to) external onlyOwner nonReentrant {
+        if (to == address(0)) revert IPUSH_ZeroAddress();
+        IERC20(token).safeTransfer(to, amount);
+        emit FeesSkimmed(token, amount, to);
+    }
+
+    // ------------------------------ Internal: order validation ------------------------------
+    function _validateOrderCommon(Order calldata o, bytes calldata operatorSig, address[] calldata path) internal {
+        if (o.strategyId >= strategyCount) revert IPUSH_BadStrategy(o.strategyId);
+
+        Strategy memory s = _strategies[o.strategyId];
+        if (!s.risk.enabled) revert IPUSH_RiskDisabled(o.strategyId);
+
+        if (o.venueId != s.venueId) revert IPUSH_BadVenue(o.venueId);
+        if (o.venueId >= venueCount) revert IPUSH_BadVenue(o.venueId);
+        if (!_venues[o.venueId].enabled) revert IPUSH_VenueDisabled(o.venueId);
+
+        if (path.length < 2 || path.length > MAX_PATH_LEN) revert IPUSH_TooMany();
+        if (path[0] != s.base) revert("IPUSH:base");
+        if (path[path.length - 1] != s.quote) revert("IPUSH:quote");
+
+        bytes32 expected = o.pathHash;
+        bytes32 got = pathHash(path);
+        if (got != expected) revert IPUSH_PathMismatch(got, expected);
+
+        if (o.recipient == address(0)) revert IPUSH_BadRecipient(o.recipient);
+
+        uint48 nowTs = uint48(block.timestamp);
+        if (nowTs < o.validAfter || nowTs > o.validBefore) revert IPUSH_Expired(nowTs, o.validAfter, o.validBefore);
+        uint48 ttl = o.validBefore - o.validAfter;
