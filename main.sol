@@ -448,3 +448,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
         bytes32 pathHash;
         address recipient;
     }
+
+    // ------------------------------ Permit helper ------------------------------
+    struct PermitData {
+        address token;
+        uint256 value;
+        uint256 deadline;
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
+    // ------------------------------ Errors ------------------------------
+    error IPUSH_NotKeeper(address caller);
+    error IPUSH_NotGuardian(address caller);
+    error IPUSH_ZeroAddress();
+    error IPUSH_TooMany();
+    error IPUSH_BadVenue(uint32 id);
+    error IPUSH_VenueDisabled(uint32 id);
+    error IPUSH_BadStrategy(uint32 id);
+    error IPUSH_NotOperator(address caller);
+    error IPUSH_RiskDisabled(uint32 id);
+    error IPUSH_StalePrice(uint256 updatedAt, uint256 nowTs);
+    error IPUSH_SlippageTooHigh(uint32 slippageBps, uint32 maxBps);
+    error IPUSH_Expired(uint48 nowTs, uint48 validAfter, uint48 validBefore);
+    error IPUSH_NonceMismatch(uint32 got, uint32 expected);
+    error IPUSH_PathMismatch(bytes32 got, bytes32 expected);
+    error IPUSH_TtlTooLong(uint48 ttl, uint48 maxTtl);
+    error IPUSH_Cooldown(uint48 nextOk);
+    error IPUSH_RateLimited(uint32 filled, uint32 maxPerHour);
+    error IPUSH_NotionalExceeded(uint256 wantX18, uint256 maxX18);
+    error IPUSH_BadRecipient(address r);
+    error IPUSH_BadRouter(address r);
+    error IPUSH_EthRejected();
+    error IPUSH_OracleZero();
+
+    // ------------------------------ Events ------------------------------
+    event KeeperSet(address indexed keeper, bool enabled);
+    event GuardianSet(address indexed guardian, bool enabled);
+    event TreasurySet(address indexed prev, address indexed next);
+    event OracleSet(address indexed oracle);
+
+    event VenueAdded(uint32 indexed venueId, address indexed router, bytes8 tag, uint16 feeBpsCeiling);
+    event VenueUpdated(uint32 indexed venueId, address indexed router, bytes8 tag, uint16 feeBpsCeiling, bool enabled);
+
+    event StrategyCreated(
+        uint32 indexed strategyId,
+        address indexed operator,
+        address indexed base,
+        address quote,
+        uint32 venueId,
+        bytes12 label
+    );
+
+    event StrategyRiskUpdated(uint32 indexed strategyId, RiskCfg risk);
+    event StrategyVenueUpdated(uint32 indexed strategyId, uint32 venueId);
+    event StrategyOperatorUpdated(uint32 indexed strategyId, address indexed operator);
+
+    event OrderExecuted(
+        uint32 indexed strategyId,
+        uint32 indexed venueId,
+        uint32 nonce,
+        uint8 side,
+        uint8 kind,
+        address base,
+        address quote,
+        uint256 amountIn,
+        uint256 amountOut,
+        uint64 clientTag,
+        address indexed recipient
+    );
+
+    event FeesSkimmed(address indexed token, uint256 amount, address indexed to);
+    event PausedByGuardian(address indexed guardian);
+    event UnpausedByOwner(address indexed owner);
+
