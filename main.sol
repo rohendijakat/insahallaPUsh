@@ -373,3 +373,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
         uint16 feeBpsCeiling; // optional cap for venue use
         bool enabled;
         bytes8 tag;
+    }
+
+    mapping(uint32 => Venue) private _venues;
+    uint32 public venueCount;
+
+    // ------------------------------ Strategy & order model ------------------------------
+    enum Side {
+        Buy,
+        Sell
+    }
+
+    enum OrderKind {
+        ExactIn,
+        ExactOut
+    }
+
+    struct RiskCfg {
+        uint96 maxNotionalX18; // quote denominated (scaled 1e18)
+        uint32 maxSlippageBps; // hard cap (bps)
+        uint32 maxPriceAgeSec; // oracle staleness cap
+        uint32 maxOrdersPerHour;
+        uint48 cooldownSec;
+        bool enabled;
+    }
+
+    struct Strategy {
+        address operator;
+        address base;
+        address quote;
+        uint32 venueId;
+        uint8 baseDecimalsHint; // for UI and notional previews
+        uint8 quoteDecimalsHint;
+        RiskCfg risk;
+        bytes12 label;
+    }
+
+    struct HourBucket {
+        uint48 hourStart;
+        uint32 filled;
+    }
+
+    struct StrategyState {
+        uint48 lastOrderAt;
+        uint32 ordersNonce;
+        HourBucket bucket;
+        uint96 notionalUsedX18; // cumulative quote notional estimate for risk envelope
+    }
+
+    mapping(uint32 => Strategy) private _strategies;
+    mapping(uint32 => StrategyState) private _state;
+    uint32 public strategyCount;
+
+    // ------------------------------ Signed order envelope ------------------------------
+    bytes32 private immutable _DOMAIN_SEPARATOR;
+    bytes32 private constant _EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)");
+    bytes32 private constant _ORDER_TYPEHASH = keccak256(
+        "Order(uint32 strategyId,uint32 nonce,uint32 venueId,uint8 side,uint8 kind,uint48 validAfter,uint48 validBefore,uint96 amountIn,uint96 amountOut,uint32 slippageBps,uint64 clientTag,bytes32 pathHash,address recipient)"
+    );
+
+    struct Order {
+        uint32 strategyId;
+        uint32 nonce;
+        uint32 venueId;
+        Side side;
+        OrderKind kind;
+        uint48 validAfter;
+        uint48 validBefore;
+        uint96 amountIn;
+        uint96 amountOut;
+        uint32 slippageBps;
+        uint64 clientTag;
+        bytes32 pathHash;
+        address recipient;
+    }
