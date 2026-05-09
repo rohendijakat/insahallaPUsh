@@ -673,3 +673,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
         if (!_venues[venueId].enabled) revert IPUSH_VenueDisabled(venueId);
 
         strategyId = strategyCount;
+        _strategies[strategyId] = Strategy({
+            operator: operator,
+            base: base,
+            quote: quote,
+            venueId: venueId,
+            baseDecimalsHint: baseDecimalsHint,
+            quoteDecimalsHint: quoteDecimalsHint,
+            risk: risk,
+            label: label
+        });
+        _state[strategyId] = StrategyState({
+            lastOrderAt: 0,
+            ordersNonce: 0,
+            bucket: HourBucket({hourStart: 0, filled: 0}),
+            notionalUsedX18: 0
+        });
+        strategyCount = strategyId + 1;
+
+        emit StrategyCreated(strategyId, operator, base, quote, venueId, label);
+        emit StrategyRiskUpdated(strategyId, risk);
+    }
+
+    function setStrategyOperator(uint32 strategyId, address operator) external onlyOwner {
+        if (strategyId >= strategyCount) revert IPUSH_BadStrategy(strategyId);
+        if (operator == address(0)) revert IPUSH_ZeroAddress();
+        _strategies[strategyId].operator = operator;
+        emit StrategyOperatorUpdated(strategyId, operator);
+    }
+
+    function setStrategyVenue(uint32 strategyId, uint32 venueId) external onlyOwner {
+        if (strategyId >= strategyCount) revert IPUSH_BadStrategy(strategyId);
+        if (venueId >= venueCount) revert IPUSH_BadVenue(venueId);
+        if (!_venues[venueId].enabled) revert IPUSH_VenueDisabled(venueId);
+        _strategies[strategyId].venueId = venueId;
+        emit StrategyVenueUpdated(strategyId, venueId);
+    }
+
+    function setStrategyRisk(uint32 strategyId, RiskCfg calldata risk) external onlyOwner {
+        if (strategyId >= strategyCount) revert IPUSH_BadStrategy(strategyId);
+        _strategies[strategyId].risk = risk;
+        emit StrategyRiskUpdated(strategyId, risk);
+    }
+
+    // ------------------------------ Operator helpers ------------------------------
+    function operatorBumpNonce(uint32 strategyId) external {
+        if (strategyId >= strategyCount) revert IPUSH_BadStrategy(strategyId);
+        Strategy memory s = _strategies[strategyId];
+        if (msg.sender != s.operator) revert IPUSH_NotOperator(msg.sender);
+        _state[strategyId].ordersNonce++;
+    }
+
+    // ------------------------------ Core execution ------------------------------
+    function executeOrderExactIn(
+        Order calldata o,
+        bytes calldata operatorSig,
+        address[] calldata path,
+        PermitData calldata permit
+    ) external onlyKeeper whenNotPaused nonReentrant returns (uint256 amountIn, uint256 amountOut) {
+        _validateOrderCommon(o, operatorSig, path);
+        if (o.kind != OrderKind.ExactIn) revert("IPUSH:kind");
+        amountIn = uint256(o.amountIn);
+
+        (address base, address quote) = (path[0], path[path.length - 1]);
+        _applyRiskAndState(o.strategyId, quote, o.side, amountIn, uint256(o.amountOut), o.slippageBps);
+
+        if (permit.token != address(0)) _tryPermit(permit);
+        _pullFunds(base, o.recipient, amountIn);
+
+        (amountOut) = _swapExactIn(o, path, amountIn);
+
+        emit OrderExecuted(
+            o.strategyId,
+            o.venueId,
+            o.nonce,
+            uint8(o.side),
