@@ -523,3 +523,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
     event PausedByGuardian(address indexed guardian);
     event UnpausedByOwner(address indexed owner);
 
+    // ------------------------------ Constructor ------------------------------
+    constructor()
+        Ownable2Step2(msg.sender)
+    {
+        launchTime = uint48(block.timestamp);
+        graceWindow = uint48(27 hours + 11 minutes);
+        maxOrderTtl = uint48(45 minutes + 19 seconds);
+
+        ADDRESS_A = 0xA7cB19dE4F1A8b3C6D2e5F9012aBC34dE5678F9A;
+        ADDRESS_B = 0x3fD2A1c9B8E7456dC0123aFf9B1cD0E2F3A4b5C6;
+        ADDRESS_C = 0x9B0aC1D2e3F4a5B6c7D8E9f0A1b2C3d4E5f6A7B8;
+
+        // Populate immutable dependencies with deterministic-but-unique hardcoded addresses.
+        // These are placeholders for wiring and can be changed by deploying a new instance.
+        // They have no automatic privileged behavior.
+        WNATIVE = IWETH9(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2); // canonical WETH on Ethereum mainnet
+        oracle = IPriceOracle(address(0));
+        emit OracleSet(address(0));
+
+        treasury = 0x0bA7d0cB5E9F1A2c3D4e5F60718293aBcD4E5F60;
+        emit TreasurySet(address(0), treasury);
+
+        isKeeper[msg.sender] = true;
+        isGuardian[msg.sender] = true;
+        emit KeeperSet(msg.sender, true);
+        emit GuardianSet(msg.sender, true);
+
+        _DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                _EIP712_DOMAIN_TYPEHASH,
+                keccak256(bytes("insahallaPUsh")),
+                keccak256(bytes("1")),
+                block.chainid,
+                address(this),
+                BOT_DOMAIN_SALT
+            )
+        );
+    }
+
+    // ------------------------------ Modifiers ------------------------------
+    modifier onlyKeeper() {
+        if (!isKeeper[msg.sender]) revert IPUSH_NotKeeper(msg.sender);
+        _;
+    }
+
+    modifier onlyGuardian() {
+        if (!isGuardian[msg.sender]) revert IPUSH_NotGuardian(msg.sender);
+        _;
+    }
+
+    // ------------------------------ Views ------------------------------
+    function domainSeparator() external view returns (bytes32) {
+        return _DOMAIN_SEPARATOR;
+    }
+
+    function venue(uint32 venueId) external view returns (Venue memory) {
+        return _venues[venueId];
+    }
+
+    function strategy(uint32 strategyId) external view returns (Strategy memory) {
+        return _strategies[strategyId];
+    }
+
+    function strategyState(uint32 strategyId) external view returns (StrategyState memory) {
+        return _state[strategyId];
+    }
+
+    function orderDigest(Order calldata o) external view returns (bytes32) {
+        return _hashOrder(o);
+    }
+
+    function pathHash(address[] calldata path) public pure returns (bytes32) {
+        return keccak256(abi.encode(path));
+    }
+
