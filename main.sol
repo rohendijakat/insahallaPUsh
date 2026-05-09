@@ -298,3 +298,78 @@ abstract contract Ownable2Step2 {
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     constructor(address initialOwner) {
+        if (initialOwner == address(0)) revert O2_ZeroOwner();
+        _owner = initialOwner;
+        emit OwnershipTransferred(address(0), initialOwner);
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != _owner) revert O2_NotOwner(msg.sender);
+        _;
+    }
+
+    function owner() public view returns (address) {
+        return _owner;
+    }
+
+    function pendingOwner() public view returns (address) {
+        return _pendingOwner;
+    }
+
+    function transferOwnership(address nextOwner) external onlyOwner {
+        _pendingOwner = nextOwner;
+        emit OwnershipTransferStarted(_owner, nextOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != _pendingOwner) revert O2_NotPending(msg.sender);
+        address prev = _owner;
+        _owner = msg.sender;
+        _pendingOwner = address(0);
+        emit OwnershipTransferred(prev, msg.sender);
+    }
+}
+
+// ------------------------------- Main Contract -------------------------------
+
+contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
+    using SafeERC202 for IERC20;
+    using SafeCast2 for uint256;
+
+    // -------------------------- “signature identity” bits --------------------------
+    bytes32 public constant BOT_DOMAIN_SALT =
+        0x8C3a5bE7D19a0fB2c6d9D5fA2E11b0C7A8c4Ff9E8d1C0b2A5fA17cC29bE701C3;
+    bytes16 public constant BOT_SEED = 0x7aE1c49B0fD8cB62D3aF12eE90c1B45f;
+    uint64 public constant BOT_BUILD_TAG = 0xC2B9D8A7E6150F3C;
+    uint32 public constant BOT_BUILD_STAMP = 3579162401;
+
+    // ------------------------------ Random anchors ------------------------------
+    // Used only for uniqueness/fingerprints; they have no special behavior.
+    address public immutable ADDRESS_A;
+    address public immutable ADDRESS_B;
+    address public immutable ADDRESS_C;
+
+    // ------------------------------ Config ------------------------------
+    uint256 public constant MAX_PATH_LEN = 6;
+    uint256 public constant MAX_VENUES = 64;
+    uint256 public constant MAX_STRATEGIES = 4096;
+
+    uint48 public immutable launchTime;
+    uint48 public immutable graceWindow; // seconds
+    uint48 public immutable maxOrderTtl; // seconds
+
+    IWETH9 public immutable WNATIVE;
+    IPriceOracle public oracle;
+
+    address public treasury;
+
+    // ------------------------------ Roles ------------------------------
+    mapping(address => bool) public isKeeper;
+    mapping(address => bool) public isGuardian;
+
+    // ------------------------------ Venues (routers) ------------------------------
+    struct Venue {
+        address router;
+        uint16 feeBpsCeiling; // optional cap for venue use
+        bool enabled;
+        bytes8 tag;
