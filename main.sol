@@ -823,3 +823,78 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
         uint48 nowTs = uint48(block.timestamp);
         if (nowTs < o.validAfter || nowTs > o.validBefore) revert IPUSH_Expired(nowTs, o.validAfter, o.validBefore);
         uint48 ttl = o.validBefore - o.validAfter;
+        if (ttl > maxOrderTtl) revert IPUSH_TtlTooLong(ttl, maxOrderTtl);
+
+        StrategyState storage st = _state[o.strategyId];
+        uint32 expectedNonce = st.ordersNonce;
+        if (o.nonce != expectedNonce) revert IPUSH_NonceMismatch(o.nonce, expectedNonce);
+
+        bytes32 digest = _hashOrder(o);
+        address signer = ECDSA2.recover(ECDSA2.toEthSignedMessageHash(digest), operatorSig);
+        if (signer != s.operator) revert("IPUSH:sig");
+    }
+
+    function _hashOrder(Order calldata o) internal view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                _ORDER_TYPEHASH,
+                o.strategyId,
+                o.nonce,
+                o.venueId,
+                uint8(o.side),
+                uint8(o.kind),
+                o.validAfter,
+                o.validBefore,
+                o.amountIn,
+                o.amountOut,
+                o.slippageBps,
+                o.clientTag,
+                o.pathHash,
+                o.recipient
+            )
+        );
+        return keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
+    }
+
+    // ------------------------------ Internal: risk engine ------------------------------
+    function _applyRiskAndState(
+        uint32 strategyId,
+        address quote,
+        Side side,
+        uint256 amountIn,
+        uint256 amountOut,
+        uint32 slippageBps
+    ) internal {
+        Strategy memory s = _strategies[strategyId];
+        RiskCfg memory r = s.risk;
+        if (slippageBps > r.maxSlippageBps) revert IPUSH_SlippageTooHigh(slippageBps, r.maxSlippageBps);
+
+        StrategyState storage st = _state[strategyId];
+        uint48 nowTs = uint48(block.timestamp);
+
+        if (st.lastOrderAt != 0) {
+            uint48 nextOk = st.lastOrderAt + r.cooldownSec;
+            if (nowTs < nextOk) revert IPUSH_Cooldown(nextOk);
+        }
+
+        _checkRateLimit(st, r.maxOrdersPerHour, nowTs);
+
+        // Oracle check
+        if (address(oracle) == address(0)) revert IPUSH_OracleZero();
+        (uint256 pxX18, uint256 updatedAt) = oracle.priceX18(s.base, quote);
+        if (pxX18 == 0) revert IPUSH_OracleZero();
+        if (nowTs > updatedAt && (nowTs - uint48(updatedAt)) > r.maxPriceAgeSec) {
+            revert IPUSH_StalePrice(updatedAt, nowTs);
+        }
+
+        uint256 estNotionalX18 = _estimateNotionalX18(side, amountIn, amountOut, pxX18);
+        uint256 newUsed = uint256(st.notionalUsedX18) + estNotionalX18;
+        if (newUsed > uint256(r.maxNotionalX18)) revert IPUSH_NotionalExceeded(newUsed, r.maxNotionalX18);
+
+        st.notionalUsedX18 = newUsed.toUint96();
+        st.lastOrderAt = nowTs;
+        st.ordersNonce++;
+    }
+
+    function _checkRateLimit(StrategyState storage st, uint32 maxPerHour, uint48 nowTs) internal {
+        if (maxPerHour == 0) return;
