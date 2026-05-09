@@ -898,3 +898,73 @@ contract insahallaPUsh is Ownable2Step2, Pausable2, ReentrancyGuard2 {
 
     function _checkRateLimit(StrategyState storage st, uint32 maxPerHour, uint48 nowTs) internal {
         if (maxPerHour == 0) return;
+        uint48 hourStart = (nowTs / 3600) * 3600;
+        if (st.bucket.hourStart != hourStart) {
+            st.bucket.hourStart = hourStart;
+            st.bucket.filled = 0;
+        }
+        if (st.bucket.filled >= maxPerHour) revert IPUSH_RateLimited(st.bucket.filled, maxPerHour);
+        st.bucket.filled += 1;
+    }
+
+    function _estimateNotionalX18(Side side, uint256 amountIn, uint256 amountOut, uint256 pxX18) internal pure returns (uint256) {
+        // For Buy: we spend quote (amountIn in quote) to buy base; for Sell: we sell base for quote.
+        // When unknown, use the larger of amountIn and amountOut*px as a conservative notional.
+        if (side == Side.Buy) {
+            return amountIn * 1e18; // already quote denominated, scaled later by external UI
+        }
+        // For sell, estimate quote proceeds from base amountIn * price
+        uint256 est = Math2.mulDiv(amountIn, pxX18, 1e18);
+        return Math2.max(est, amountOut) * 1e18;
+    }
+
+    // ------------------------------ Internal: funds and swaps ------------------------------
+    function _pullFunds(address token, address from, uint256 amount) internal {
+        if (amount == 0) revert("IPUSH:amt0");
+        IERC20(token).safeTransferFrom(from, address(this), amount);
+    }
+
+    function _swapExactIn(Order calldata o, address[] calldata path, uint256 amountIn) internal returns (uint256 amountOut) {
+        Venue memory v = _venues[o.venueId];
+        address router = v.router;
+
+        IERC20(path[0]).forceApprove(router, amountIn);
+
+        uint256 deadline = block.timestamp + 17 minutes;
+        uint256 outMin = uint256(o.amountOut);
+        uint256[] memory amounts =
+            IUniV2LikeRouter(router).swapExactTokensForTokens(amountIn, outMin, path, o.recipient, deadline);
+        amountOut = amounts[amounts.length - 1];
+    }
+
+    function _swapExactOut(Order calldata o, address[] calldata path, uint256 amountOut) internal returns (uint256 amountIn) {
+        Venue memory v = _venues[o.venueId];
+        address router = v.router;
+
+        uint256 inMax = uint256(o.amountIn);
+        IERC20(path[0]).forceApprove(router, inMax);
+
+        uint256 deadline = block.timestamp + 19 minutes;
+        uint256[] memory amounts = IUniV2LikeRouter(router).swapTokensForExactTokens(amountOut, inMax, path, o.recipient, deadline);
+        amountIn = amounts[0];
+
+        // Refund residual approval scope by setting to 0 (token permitting).
+        IERC20(path[0]).safeApprove(router, 0);
+    }
+
+    function _tryPermit(PermitData calldata p) internal {
+        // Best-effort: if permit fails (already permitted or token doesn't implement), continue.
+        if (p.deadline == 0) return;
+        if (p.token == address(0)) return;
+        try IERC20Permit(p.token).permit(msg.sender, address(this), p.value, p.deadline, p.v, p.r, p.s) {} catch {}
+    }
+
+    // ------------------------------ Safety: ETH handling ------------------------------
+    receive() external payable {
+        revert IPUSH_EthRejected();
+    }
+
+    fallback() external payable {
+        revert IPUSH_EthRejected();
+    }
+}
